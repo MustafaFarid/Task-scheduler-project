@@ -1,0 +1,433 @@
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <thread>
+#include <codecvt>
+#include <tchar.h>
+#include "EASendMailObj.tlh"
+
+using namespace std;
+using namespace EASendMailObjLib;
+
+const int ConnectNormal = 0;
+const int ConnectSSLAuto = 1;
+const int ConnectSTARTTLS = 2;
+const int ConnectDirectSSL = 3;
+const int ConnectTryTLS = 4;
+
+// Get email details from the user (username, password, recipient .., etc) 
+// with instructions of how to generate an app password
+class get_email_data
+{
+private:
+
+    string user_const;
+    string pass_const;
+    string recipient_const;
+    string subject_const;
+    string body_const;
+
+    // Converting string into const _TCHAR
+    const _TCHAR* ConvertToTCHAR(const string& input)
+    {
+#ifdef UNICODE
+        // If UNICODE is defined, convert the input string to a wide string
+        wstring_convert<codecvt_utf8<wchar_t>> converter;
+        wstring wideString = converter.from_bytes(input);
+        return _wcsdup(wideString.c_str());
+#else
+        // If UNICODE is not defined, the input string is already of type const char*
+        return _strdup(input.c_str());
+#endif
+    }
+
+    // Instructions of how to generate an app password in gmail
+    string App_Pass_Instructions()
+    {
+        string instructions =
+            "---------------------------------------------------------------------------\n"
+            "To generate an 'App Password' for your Gmail account, follow these steps:\n"
+            "1. Go to your Google Account: https://myaccount.google.com/\n"
+            "2. In the left navigation panel, click on 'Security'\n"
+            "3. Under the 'Signing in to Google' section, click on 'App passwords'\n"
+            "4. Sign in if required, and then in the 'Select app' dropdown, choose 'Other (Custom name)'\n"
+            "5. Enter a name for the app (e.g., 'MyEmailApp') and click 'Generate'\n"
+            "6. Copy the generated App Password and use it as the password in this program\n"
+            "7. Note: The generated App Password is a long, randomly generated password\n"
+            "   and is used instead of your Google account password for the application\n"
+            "---------------------------------------------------------------------------\n";
+        return instructions;
+    }
+
+public:
+
+    void set_user()
+    {
+        cout << "Enter username: ";
+        getline(cin, user_const);
+    }
+
+    const _TCHAR* get_user()
+    {
+        return ConvertToTCHAR(user_const);
+    }
+
+    void set_pass()
+    {
+        char answer;
+        cout << "NOTE: \nthis app uses Gmail SMTP server to send emails\n"
+            << "For this, you need to generate an app password.\n"
+            << "Have you already generated your app password?\n"
+            << "y (yes)\t n (no)\t : ";
+
+        do {
+            cin >> answer;
+
+            switch (answer) {
+            case 'n':
+            case 'N':
+                cout << App_Pass_Instructions();
+                break;
+            case 'y':
+            case 'Y':
+                cout << "===========================================================================\n";
+                break;
+            default:
+                cout << "Choose a valid option\t ";
+            }
+
+        } while (answer != 'y' && answer != 'Y' && answer != 'n' && answer != 'N');
+
+        cout << "Enter password: ";
+        cin.ignore();
+        getline(cin, pass_const);
+    }
+
+    const _TCHAR* get_pass()
+    {
+        return ConvertToTCHAR(pass_const);
+    }
+
+    void set_recipient()
+    {
+        cout << "Enter recipient address: ";
+        getline(cin, recipient_const);
+    }
+
+    const _TCHAR* get_recipient()
+    {
+        return ConvertToTCHAR(recipient_const);
+    }
+
+    void set_subject()
+    {
+        cout << "Enter subject: ";
+        getline(cin, subject_const);
+    }
+
+    const _TCHAR* get_subject()
+    {
+        return ConvertToTCHAR(subject_const);
+    }
+
+    void set_body()
+    {
+        cout << "Enter body (press Enter on an empty line to finish):\n";
+
+        // Clear the existing content
+        body_const.clear();
+
+        // Read lines until an empty line is entered
+        while (true)
+        {
+            string line;
+            getline(cin, line);
+
+            // Break the loop if an empty line is entered
+            if (line.empty())
+            {
+                break;
+            }
+            // Concatenate the line and newline character
+            body_const += line + '\n';
+        }
+    }
+
+    const _TCHAR* get_body()
+    {
+        return ConvertToTCHAR(body_const);
+    }
+
+};
+
+/********************************** EmailSender Class Definition **********************************/
+class EmailSender
+{
+private:
+
+    IMailPtr oSmtp;
+
+public:
+
+    EmailSender()
+    {
+        ::CoInitialize(NULL);
+        oSmtp.CreateInstance(__uuidof(EASendMailObjLib::Mail));
+        oSmtp->LicenseCode = _T("TryIt");
+    }
+
+    void SendEmail(const _TCHAR* sender, const _TCHAR* password, const _TCHAR* recipient,
+                   const _TCHAR* subject, const _TCHAR* body)
+    {
+        oSmtp->FromAddr = sender;
+        oSmtp->AddRecipientEx(recipient, 0);
+        oSmtp->Subject = subject;
+        oSmtp->BodyText = body;
+
+        oSmtp->ServerAddr = _T("smtp.gmail.com");
+        oSmtp->UserName = sender;
+        oSmtp->Password = password;
+        oSmtp->ServerPort = 587;
+        oSmtp->ConnectType = ConnectSSLAuto;
+
+        cout << "Start to send email via gmail account ...\r\n";
+
+        if (oSmtp->SendMail() == 0)
+        {
+            cout << "Email was sent successfully!\r\n";
+        }
+        else 
+        {
+            cout << "Failed to send email with the following error: %s\r\n"
+                 << (const TCHAR*)oSmtp->GetLastErrDescription();
+        }
+    }
+};
+
+/********************************** Task Class Definition **********************************/
+class Task
+{
+private:
+
+    string taskName;
+    int userHour, userMinute, userSecond;
+
+public:
+
+    Task() : taskName("not"), userHour(0), userMinute(0), userSecond(0) {} //empty constructor
+
+    void setTaskName()
+    {
+        cout << "Enter task name: ";
+        getline(cin, taskName);
+    }
+
+    void setExecutionTime()
+    {
+        cout << "Enter time in HH:MM:SS format: ";
+        cin >> userHour >> userMinute >> userSecond;
+        cin.ignore(); // Ignore the newline character left in the buffer
+    }
+
+    long int time_wait()
+    {
+        time_t currentTime = std::time(nullptr);
+        struct tm localTime;
+        localtime_s(&localTime, &currentTime);
+        int currentHour = localTime.tm_hour;
+        int currentMinute = localTime.tm_min;
+        int currentSecond = localTime.tm_sec;
+
+        int hourDiff = userHour - currentHour;
+        int minuteDiff = userMinute - currentMinute;
+        int secondDiff = userSecond - currentSecond;
+
+        return hourDiff * 3600 + minuteDiff * 60 + secondDiff;
+    }
+
+    void display() const 
+    {
+        cout << "Task Name: " << taskName << endl;
+        // Display additional task details if needed
+    }
+};
+
+/************************************************************************************************/
+/*****************************************open program*****************************************/
+void openProgram(string appPath)
+{
+    // Run the specified application using the system function
+    int result = system(appPath.c_str());
+
+    if (result == 0)
+    {
+        cout << "Application executed successfully." << endl;
+    }
+    else
+    {
+        cout << "Failed to execute the application." << endl;
+    }
+}
+
+/************************************************************************************************/
+/*****************************************send email*******************************************/
+void sendEmailTask(const _TCHAR* sender, const _TCHAR* password, const _TCHAR* recipient,
+                   const _TCHAR* subject, const _TCHAR* body)
+{
+    EmailSender emailSender;
+    emailSender.SendEmail(sender, password, recipient, subject, body);
+}
+
+/************************************************************************************************/
+
+int main()
+{
+    cout << "***************************************************  Task Scheduler  ***************************************************" << endl;
+
+    int choice = 0;
+    Task task;
+
+    do 
+    {
+        cout << "\n************************************************************************************************************************" << endl;
+        cout << "                                                         (1)                                                              " << endl;
+
+        cout << "1. Add Task\n";
+        cout << "2. Display Tasks\n";
+        cout << "3. Exit\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        cin.ignore(); // Ignore the newline character left in the buffer
+        cout << "\n************************************************************************************************************************" << endl;
+
+        switch (choice)
+        {
+        case 1:
+            cout << "\n************************************************************************************************************************" << endl;
+            cout << "                                                         (2)                                                              " << endl;
+            task.setTaskName();
+            task.setExecutionTime();
+            cout << "\n************************************************************************************************************************" << endl;
+
+
+            cout << "\n************************************************************************************************************************" << endl;
+            cout << "                                                         (3)                                                              " << endl;
+            cout << "Choose the action:" << endl;
+            cout << "1. Start a program\n";
+            cout << "2. Send an email\n";
+            cout << "3. Display a message\n";
+            cout << "Enter your choice: ";
+            int action_choice;
+            cin >> action_choice;
+            cin.ignore(); // Ignore the newline character left in the buffer
+            cout << "\n************************************************************************************************************************" << endl;
+
+            switch (action_choice)
+            {
+            case 1:
+            {
+                cout << "\n************************************************************************************************************************" << endl;
+                cout << "                                                         (4)                                                              " << endl;
+
+                int total_seconds = 0;
+                total_seconds = task.time_wait();
+                cout << "Enter the path of the program: ";
+                string program_path;
+                getline(cin, program_path);
+                this_thread::sleep_for(chrono::seconds(total_seconds));
+                openProgram(program_path);
+                // Add logic to store the program path for the task
+                cout << "\n************************************************************************************************************************" << endl;
+
+                break;
+            }
+            case 2:
+            {
+                cout << "\n************************************************************************************************************************" << endl;
+                cout << "                                                         (4)                                                              " << endl;
+
+                // Set and get email details
+                get_email_data g;
+
+                // Set username
+                g.set_user();
+                const _TCHAR* sender = g.get_user();
+                cout << "===========================================================================\n";
+
+                // Set password
+                g.set_pass();
+                const _TCHAR* password = g.get_pass();
+                cout << "===========================================================================\n";
+
+                // Set recipient
+                g.set_recipient();
+                const _TCHAR* recipient = g.get_recipient();
+                cout << "===========================================================================\n";
+
+                // Set subject
+                g.set_subject();
+                const _TCHAR* subject = g.get_subject();
+                cout << "===========================================================================\n";
+
+                // Set body
+                g.set_body();
+                const _TCHAR* body = g.get_body();
+                cout << "===========================================================================\n";
+
+                // Send email after waiting for the specified time
+                int total_seconds = task.time_wait();
+                this_thread::sleep_for(chrono::seconds(total_seconds));
+                sendEmailTask(sender, password, recipient, subject, body);
+
+                // Memory cleanup
+                free((void*)sender);
+                free((void*)password);
+                free((void*)recipient);
+                free((void*)subject);
+                free((void*)body);
+
+                cout << "\n************************************************************************************************************************" << endl;
+            }
+                break;
+            case 3:
+            {
+                cout << "\n************************************************************************************************************************" << endl;
+                cout << "                                                         (4)                                                              " << endl;
+                cout << "Enter the message: ";
+                string message;
+                getline(cin, message);
+                int total_seconds = task.time_wait();
+                this_thread::sleep_for(chrono::seconds(total_seconds));
+                cout << message << endl;
+
+                // Add logic to store the message for the task
+                cout << "\n************************************************************************************************************************" << endl;
+
+            }
+                  break;
+            default:
+                cout << "Invalid action choice. Task not added.\n";
+            }
+            break;
+
+        case 2:
+            task.display();
+            break;
+
+        case 3:
+            cout << "Exiting the program.\n";
+            break;
+
+        default:
+            cout << "Invalid choice. Try again.\n";
+
+        }
+
+    } while (choice != 3);
+
+    return 0;
+}
